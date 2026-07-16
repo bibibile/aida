@@ -44,8 +44,12 @@ def mask_email(email):
     return f"{masked_local}@{domain}"
 
 def login(sb, email, password):
-    print("🌐 打开登录页面...")
-    sb.open(LOGIN_URL)
+    print("🌐 使用 UC 模式隐身打开登录页面...")
+    # 核心修复 1: 采用断开/重连机制加载页面，防止初始化被 CF 标记
+    sb.uc_open_with_reconnect(LOGIN_URL, reconnect_time=4)
+    
+    # 核心修复 3: 最大化窗口，确保 Xvfb 下 GUI 坐标点击精准
+    sb.maximize_window()
     sb.wait_for_ready_state_complete()
     time.sleep(2)
 
@@ -53,6 +57,7 @@ def login(sb, email, password):
     sb.type('#login-id', email, timeout=10)
     print("🔑 填写密码...")
     sb.type('#login-pw', password, timeout=10)
+    time.sleep(1)
 
     print("🛡️ 处理 Turnstile...")
     try:
@@ -61,12 +66,18 @@ def login(sb, email, password):
     except Exception as e:
         print(f"⚠️ Turnstile 处理异常: {e}")
 
-    print("🔑 点击登录按钮...")
-    sb.uc_click('button:contains("ログイン")')
+    # 留给验证码加载和解析的缓冲时间
+    time.sleep(2)
 
+    print("🔑 点击登录按钮...")
+    # 核心修复 2: 登录按钮选择器兼容性优化，并在点击时断开驱动 5 秒，防止提交时被检测
+    login_btn_selector = 'button[type="submit"], button:contains("ログイン"), button:contains("Login")'
+    sb.uc_click(login_btn_selector, reconnect_time=5)
+
+    # 重新连接后，循环等待并检查页面是否成功跳转
     for _ in range(30):
         cur = sb.get_current_url()
-        if "login" not in cur or "account" in cur:
+        if "login" not in cur or "dashboard" in cur or "account" in cur:
             print(f"✅ 登录成功，当前 URL: {cur}")
             return True
         time.sleep(1)
@@ -84,7 +95,7 @@ def get_remaining_time(sb):
     # 匹配 "残り 23:10:23" 或 "残り 24:00:46"
     match = re.search(r'残り\s*(\d{1,2}:\d{2}:\d{2})', page_source)
     if match:
-        return match.group(1)  # 只返回时间部分
+        return match.group(1)
 
     # 备选：从元素中提取
     for xp in ['//*[contains(text(), "残り")]', '//span[contains(@class, "time")]']:
@@ -101,6 +112,7 @@ def get_remaining_time(sb):
 
 def click_extend_button(sb):
     """尝试多种选择器点击延期按钮，返回是否成功"""
+    # 核心修复 4: 将简体字 '延长/时间' 全部修正为日文汉字 '延長/時間'
     selectors = [
         'button[title="稼働時間を最大まで延長"]',
         'button[aria-label="稼働時間を延長"]',
@@ -127,7 +139,7 @@ def click_extend_button(sb):
 
 def main():
     print("#" * 25)
-    print("   Aida 自动登录续期")
+    print("    Aida 自动登录续期")
     print("#" * 25)
 
     IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
@@ -162,7 +174,7 @@ def main():
         current_url = sb.get_current_url()
         current_title = sb.get_title() or ""
         print(f"✅ 当前 URL: {current_url}")
-        if "Mochi Hosting｜Minecraft" in current_title:
+        if "Mochi Hosting" in current_title or "Minecraft" in current_title:
             print(f"✅ 标题匹配: {current_title}")
         else:
             print(f"⚠️ 标题不包含预期内容，当前: {current_title}")
